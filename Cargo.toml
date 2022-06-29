@@ -1,0 +1,16 @@
+[package]
+name = "auth-uservice"
+version = "0.1.0"
+edition = "2021"
+
+[profile.release]
+opt-level = "s"
+strip = "symbols"
+panic = "abort"
+lto = true
+codegen-units = 1
+
+[dependencies]
+actix-web = "4.1.0"
+anyhow = "1.0.58"
+env_logger = "0.9.0"
