@@ -14,6 +14,7 @@ use uuid::Uuid;
 
 use crate::models::user::User;
 use crate::models::user::UserBuilder;
+use crate::models::user::UserCreateReqDtoBuilder;
 use crate::repositories::user::UserRepo;
 use crate::services::user::delete_user;
 use crate::services::user::get_user_by_id;
@@ -54,8 +55,8 @@ async fn test_get_user_by_id() -> Result<()> {
     let resp = test::call_service(&app, req).await;
     assert_eq!(
         resp.status(),
-        StatusCode::NOT_FOUND,
-        "GET /users/invalid status code was not NOT FOUND"
+        StatusCode::BAD_REQUEST,
+        "GET /users/invalid status code was not BAD REQUEST"
     );
 
     Ok(())
@@ -72,10 +73,9 @@ async fn test_post_user() -> Result<()> {
     .await;
 
     // Test a valid user creation
-    let mut new_user = UserBuilder::default()
+    let new_user = UserCreateReqDtoBuilder::default()
         .username("Derek")
-        .password_hash("abc123")
-        .password_salt("salt123")
+        .password_raw("abc123")
         .build()?;
 
     let req = test::TestRequest::post()
@@ -101,6 +101,7 @@ async fn test_post_user() -> Result<()> {
         user_repo.get_user_by_id(&user_id).await.is_ok(),
         "UserRepo does not contain newly created user"
     );
+    let mut new_user = User::from(new_user);
     new_user.id = Some(user_id);
     user_map.insert(user_id, new_user);
 
@@ -147,8 +148,8 @@ async fn test_delete_user() -> Result<()> {
     let resp = test::call_service(&app, req).await;
     assert_eq!(
         resp.status(),
-        StatusCode::NOT_FOUND,
-        "DELETE /users/invalid status code was not NOT FOUND"
+        StatusCode::BAD_REQUEST,
+        "DELETE /users/invalid status code was not BAD REQUEST"
     );
 
     Ok(())

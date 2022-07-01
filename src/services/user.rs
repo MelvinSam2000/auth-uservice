@@ -4,6 +4,7 @@ use actix_web::web::Path;
 use actix_web::HttpResponse;
 use uuid::Uuid;
 
+use crate::errors::user::log_anyhow_err;
 use crate::errors::user::UserServiceError;
 use crate::errors::user::UserServiceResult;
 use crate::models::user::User;
@@ -20,7 +21,7 @@ where
     let user = user_repo
         .get_user_by_id(&user_id)
         .await
-        .map_err(|_| UserServiceError::InvalidId(user_id_str))?;
+        .map_err(|_| UserServiceError::NoUserForId(user_id_str))?;
     Ok(HttpResponse::Ok().json(user))
 }
 
@@ -29,9 +30,18 @@ where
     T: UserRepo,
 {
     let user = User::from(user.0);
+    if user_repo
+        .contains_user_with_username(&user.username)
+        .await
+        .map_err(log_anyhow_err)
+        .map_err(|_| UserServiceError::UnknownInternal)?
+    {
+        return Err(UserServiceError::UsernameTaken);
+    }
     let user_id = user_repo
         .create_user(&user)
         .await
+        .map_err(log_anyhow_err)
         .map_err(|_| UserServiceError::UnknownInternal)?;
     Ok(HttpResponse::Ok().json(user_id))
 }
@@ -46,7 +56,7 @@ where
     user_repo
         .delete_user_by_id(&user_id)
         .await
-        .map_err(|_| UserServiceError::InvalidId(user_id_str))?;
+        .map_err(|_| UserServiceError::NoUserForId(user_id_str))?;
 
     Ok(HttpResponse::Ok().into())
 }

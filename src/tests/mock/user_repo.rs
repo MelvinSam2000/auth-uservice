@@ -64,4 +64,14 @@ impl UserRepo for MockUserRepo {
             .map(|_| ())
             .context("Failed to delete user with given ID")
     }
+
+    async fn contains_user_with_username(&self, username: &str) -> Result<bool> {
+        Ok(self
+            .0
+            .lock()
+            .await
+            .values()
+            .map(|user| &user.username)
+            .any(|other_username| other_username == username))
+    }
 }
