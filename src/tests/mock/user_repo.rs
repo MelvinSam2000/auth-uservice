@@ -18,9 +18,11 @@ impl Default for MockUserRepo {
     }
 }
 
-impl From<HashMap<Uuid, User>> for MockUserRepo {
-    fn from(map: HashMap<Uuid, User>) -> Self {
-        Self(Mutex::new(map))
+impl From<Vec<User>> for MockUserRepo {
+    fn from(v: Vec<User>) -> Self {
+        Self(Mutex::new(HashMap::from_iter(
+            v.into_iter().map(|x| (x.id, x)),
+        )))
     }
 }
 

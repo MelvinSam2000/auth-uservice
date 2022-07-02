@@ -19,6 +19,7 @@ async fn main() -> Result<()> {
     env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
 
     let user_repo = Data::new(UserRepoDb::init(DB_URL).await?);
+    user_repo.create_table().await?;
     let passwd_hasher = Data::new(PasswordHasher::default());
 
     HttpServer::new(move || {
@@ -26,15 +27,9 @@ async fn main() -> Result<()> {
             .wrap(Logger::default())
             .app_data(user_repo.clone())
             .app_data(passwd_hasher.clone())
-            .route(
-                "/users/{user_id}",
-                web::get().to(get_user_by_id::<UserRepoDb>),
-            )
-            .route("/users", web::post().to(post_user::<UserRepoDb>))
-            .route(
-                "/users/{user_id}",
-                web::delete().to(delete_user::<UserRepoDb>),
-            )
+            .route("/users/{user_id}", web::get().to(get_user_by_id))
+            .route("/users", web::post().to(post_user))
+            .route("/users/{user_id}", web::delete().to(delete_user))
     })
     .bind(SERVER_URL)?
     .run()

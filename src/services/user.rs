@@ -14,13 +14,10 @@ use crate::models::user::UserCreateReqDto;
 use crate::models::user::UserGetRespDto;
 use crate::repositories::user::UserRepo;
 
-pub async fn get_user_by_id<T>(
-    user_repo: Data<T>,
+pub async fn get_user_by_id(
+    user_repo: Data<dyn UserRepo>,
     user_id: Path<String>,
-) -> UserServiceResult<UserGetRespDto>
-where
-    T: UserRepo,
-{
+) -> UserServiceResult<UserGetRespDto> {
     let user_id_str = user_id.into_inner();
     let user_id = Uuid::try_parse(&user_id_str)
         .map_err(|_| UserServiceError::InvalidId(user_id_str.clone()))?;
@@ -32,14 +29,11 @@ where
     Ok(Json(user))
 }
 
-pub async fn post_user<T>(
-    user_repo: Data<T>,
+pub async fn post_user(
+    user_repo: Data<dyn UserRepo>,
     passwd_hasher: Data<PasswordHasher>,
     user: Json<UserCreateReqDto>,
-) -> UserServiceResult<Uuid>
-where
-    T: UserRepo,
-{
+) -> UserServiceResult<Uuid> {
     user.0
         .validate()
         .map_err(UserServiceError::InvalidUserFields)?;
@@ -83,10 +77,10 @@ where
     Ok(Json(user_id))
 }
 
-pub async fn delete_user<T>(user_repo: Data<T>, user_id: Path<String>) -> UserServiceResult<()>
-where
-    T: UserRepo,
-{
+pub async fn delete_user(
+    user_repo: Data<dyn UserRepo>,
+    user_id: Path<String>,
+) -> UserServiceResult<()> {
     let user_id_str = user_id.into_inner();
     let user_id = Uuid::try_parse(&user_id_str)
         .map_err(|_| UserServiceError::InvalidId(user_id_str.clone()))?;

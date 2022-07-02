@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::sync::Arc;
 
 use actix_web::http::StatusCode;
 use actix_web::test;
@@ -7,8 +7,9 @@ use actix_web::web::Data;
 use actix_web::App;
 use anyhow::Context;
 use anyhow::Result;
+use async_trait::async_trait;
 use chrono::Utc;
-use itertools::assert_equal;
+use rstest::*;
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -16,24 +17,30 @@ use crate::crypto::PasswordHasher;
 use crate::models::user::User;
 use crate::models::user::UserBuilder;
 use crate::models::user::UserCreateReqDtoBuilder;
+use crate::repositories::psql::user::UserRepoDb;
 use crate::repositories::user::UserRepo;
 use crate::services::user::delete_user;
 use crate::services::user::get_user_by_id;
 use crate::services::user::post_user;
 use crate::tests::mock::user_repo::MockUserRepo;
 
+#[rstest]
+#[case::no_db(Arc::new(MockUserRepoNoDb))]
+#[case::psql_db(Arc::new(MockUserRepoPsqlDb))]
 #[actix_web::test]
-async fn test_get_user_by_id() -> Result<()> {
-    let (user_map, user_repo) = mock_user_repo().await?;
-    let app = test::init_service(App::new().app_data(user_repo).route(
-        "/users/{user_id}",
-        web::get().to(get_user_by_id::<MockUserRepo>),
-    ))
+async fn test_get_user_by_id(#[case] testable_repo: Arc<dyn InjectableMockUserRepo>) -> Result<()> {
+    let (user_vec, user_repo) = testable_repo.init(0).await?;
+    let user_repo = Data::from(user_repo);
+    let app = test::init_service(
+        App::new()
+            .app_data(user_repo)
+            .route("/users/{user_id}", web::get().to(get_user_by_id)),
+    )
     .await;
 
     // Test successful requests from valid IDs
-    for id in user_map.keys() {
-        let uri = format!("/users/{}", id.simple());
+    for user in user_vec {
+        let uri = format!("/users/{}", user.id.simple());
         let req = test::TestRequest::get().uri(&uri).to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(
@@ -49,7 +56,7 @@ async fn test_get_user_by_id() -> Result<()> {
                 .context("No username for payload")?
                 .as_str()
                 .context("Cant parse to str")?,
-            user_map.get(&id).context("No user with given ID")?.username,
+            user.username,
             "GET {} response is invalid",
             &uri
         );
@@ -67,15 +74,19 @@ async fn test_get_user_by_id() -> Result<()> {
     Ok(())
 }
 
+#[rstest]
+#[case::no_db(Arc::new(MockUserRepoNoDb))]
+#[case::psql_db(Arc::new(MockUserRepoPsqlDb))]
 #[actix_web::test]
-async fn test_post_user() -> Result<()> {
-    let (_, user_repo) = mock_user_repo().await?;
+async fn test_post_user(#[case] testable_repo: Arc<dyn InjectableMockUserRepo>) -> Result<()> {
+    let (_, user_repo) = testable_repo.init(1).await?;
+    let user_repo = Data::from(user_repo);
     let pwd_hasher = Data::new(PasswordHasher::default());
     let app = test::init_service(
         App::new()
             .app_data(user_repo.clone())
             .app_data(pwd_hasher.clone())
-            .route("/users", web::post().to(post_user::<MockUserRepo>)),
+            .route("/users", web::post().to(post_user)),
     )
     .await;
 
@@ -158,21 +169,22 @@ async fn test_post_user() -> Result<()> {
     Ok(())
 }
 
+#[rstest]
+#[case::no_db(Arc::new(MockUserRepoNoDb))]
+#[case::psql_db(Arc::new(MockUserRepoPsqlDb))]
 #[actix_web::test]
-async fn test_delete_user() -> Result<()> {
-    let (mut user_map, user_repo) = mock_user_repo().await?;
-    let app = test::init_service(App::new().app_data(user_repo.clone()).route(
-        "/users/{user_id}",
-        web::delete().to(delete_user::<MockUserRepo>),
-    ))
+async fn test_delete_user(#[case] testable_repo: Arc<dyn InjectableMockUserRepo>) -> Result<()> {
+    let (user_vec, user_repo) = testable_repo.init(2).await?;
+    let user_repo = Data::from(user_repo);
+    let app = test::init_service(
+        App::new()
+            .app_data(user_repo.clone())
+            .route("/users/{user_id}", web::delete().to(delete_user)),
+    )
     .await;
 
     // Test valid user deletion
-    let id = user_map
-        .keys()
-        .next()
-        .cloned()
-        .context("No more users left...")?;
+    let id = user_vec[0].id;
     let uri = &format!("/users/{}", id.simple());
     let req = test::TestRequest::delete().uri(uri).to_request();
     let resp = test::call_service(&app, req).await;
@@ -183,10 +195,7 @@ async fn test_delete_user() -> Result<()> {
         "DELETE {} status code was not OK",
         &uri,
     );
-    user_map.remove(&id).context("No user with given ID")?;
-
-    assert_equal(user_map.keys(), user_repo.0.lock().await.keys());
-    assert_equal(user_map.values(), user_repo.0.lock().await.values());
+    assert!(user_repo.get_user_by_id(&id).await.is_err());
 
     // Test invalid request from invalid ID
     let req = test::TestRequest::delete()
@@ -202,42 +211,79 @@ async fn test_delete_user() -> Result<()> {
     Ok(())
 }
 
-async fn mock_user_repo() -> Result<(HashMap<Uuid, User>, Data<MockUserRepo>)> {
-    let ids = [Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4()];
+#[async_trait]
+trait InjectableMockUserRepo {
+    async fn init(&self, test_id: u8) -> Result<(Vec<User>, Arc<dyn UserRepo>)>;
+}
 
-    let user_map: HashMap<Uuid, User> = HashMap::from([
-        (
-            ids[0],
+struct MockUserRepoNoDb;
+
+#[async_trait]
+impl InjectableMockUserRepo for MockUserRepoNoDb {
+    async fn init(&self, _test_id: u8) -> Result<(Vec<User>, Arc<dyn UserRepo>)> {
+        let user_vec = vec![
             UserBuilder::default()
-                .id(ids[0])
+                .id(Uuid::new_v4())
                 .username("Alice")
                 .password_hash("phash1234")
                 .build()?,
-        ),
-        (
-            ids[1],
             UserBuilder::default()
-                .id(ids[1])
+                .id(Uuid::new_v4())
                 .username("Bob")
                 .password_hash("hunter2")
                 .email("bobmaster@email.com")
                 .build()?,
-        ),
-        (
-            ids[2],
             UserBuilder::default()
-                .id(ids[2])
+                .id(Uuid::new_v4())
                 .username("Carl")
                 .password_hash("blahblah")
                 .email("carl@email.com")
                 .created_at(Utc::now())
                 .last_login(Utc::now())
                 .build()?,
-        ),
-    ]);
+        ];
 
-    let user_repo = MockUserRepo::from(user_map.clone());
-    let user_repo: Data<MockUserRepo> = Data::new(user_repo);
+        let user_repo = Arc::new(MockUserRepo::from(user_vec.clone()));
 
-    Ok((user_map, user_repo))
+        Ok((user_vec, user_repo))
+    }
+}
+
+struct MockUserRepoPsqlDb;
+
+#[async_trait]
+impl InjectableMockUserRepo for MockUserRepoPsqlDb {
+    async fn init(&self, test_id: u8) -> Result<(Vec<User>, Arc<dyn UserRepo>)> {
+        const TEST_DB_URL: &str = "postgres://postgres:postgres@127.0.0.1:5432/test_users_db";
+        let user_repo = UserRepoDb::init(&format!("{}_{}", TEST_DB_URL, test_id)).await?;
+        let user_vec = vec![
+            UserBuilder::default()
+                .id(Uuid::new_v4())
+                .username("Alice")
+                .password_hash("phash1234")
+                .build()?,
+            UserBuilder::default()
+                .id(Uuid::new_v4())
+                .username("Bob")
+                .password_hash("hunter2")
+                .email("bobmaster@email.com")
+                .build()?,
+            UserBuilder::default()
+                .id(Uuid::new_v4())
+                .username("Carl")
+                .password_hash("blahblah")
+                .email("carl@email.com")
+                .created_at(Utc::now())
+                .last_login(Utc::now())
+                .build()?,
+        ];
+        user_repo.drop_table().await?;
+        user_repo.create_table().await?;
+        for user in user_vec.iter() {
+            user_repo.create_user(user).await?;
+        }
+
+        let user_repo = Arc::new(user_repo);
+        Ok((user_vec, user_repo))
+    }
 }

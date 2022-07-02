@@ -16,6 +16,10 @@ impl UserRepoDb {
             .max_connections(5)
             .connect(db_url)
             .await?;
+        Ok(Self(pool))
+    }
+
+    pub async fn create_table(&self) -> Result<()> {
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS users (
@@ -27,9 +31,17 @@ impl UserRepoDb {
                 last_login TIMESTAMP WITH TIME ZONE
             )"#,
         )
-        .execute(&pool)
+        .execute(&self.0)
         .await?;
-        Ok(Self(pool))
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub async fn drop_table(&self) -> Result<()> {
+        sqlx::query("DROP TABLE IF EXISTS users")
+            .execute(&self.0)
+            .await?;
+        Ok(())
     }
 }
 
