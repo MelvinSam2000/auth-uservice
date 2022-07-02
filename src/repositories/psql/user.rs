@@ -1,5 +1,3 @@
-#![allow(unused_variables)]
-
 use anyhow::anyhow;
 use anyhow::Result;
 use async_trait::async_trait;
@@ -24,10 +22,9 @@ impl UserRepoDb {
                 id UUID PRIMARY KEY,
                 username VARCHAR NOT NULL,
                 password_hash VARCHAR NOT NULL,
-                password_salt VARCHAR NOT NULL,
                 email VARCHAR,
-                created_at VARCHAR,
-                last_login VARCHAR
+                created_at TIMESTAMP WITH TIME ZONE,
+                last_login TIMESTAMP WITH TIME ZONE
             )"#,
         )
         .execute(&pool)
@@ -38,38 +35,34 @@ impl UserRepoDb {
 
 #[async_trait]
 impl UserRepo for UserRepoDb {
-    async fn create_user(&self, user: &User) -> Result<Uuid> {
-        let id = Uuid::new_v4();
-        let mut user = user.clone();
-        user.id = Some(id);
+    async fn create_user(&self, user: &User) -> Result<()> {
         sqlx::query(
             r#"
             INSERT INTO users 
-            (id, username, password_hash, password_salt, email, created_at, last_login) 
+            (id, username, password_hash, email, created_at, last_login) 
             VALUES 
-            ($1, $2, $3, $4, $5, $6, $7)"#,
+            ($1, $2, $3, $4, $5, $6)"#,
         )
         .bind(&user.id)
         .bind(&user.username)
         .bind(&user.password_hash)
-        .bind(&user.password_salt)
         .bind(&user.email)
         .bind(&user.created_at)
         .bind(&user.last_login)
         .execute(&self.0)
         .await?;
-        Ok(id)
+        Ok(())
     }
 
     async fn get_user_by_id(&self, user_id: &Uuid) -> Result<User> {
-        let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
+        let user = sqlx::query_as("SELECT * FROM users WHERE id = $1")
             .bind(user_id)
             .fetch_one(&self.0)
             .await?;
         Ok(user)
     }
 
-    async fn update_user_by_id(&self, user_id: &Uuid, new_user: &User) -> Result<()> {
+    async fn update_user_by_id(&self, _user_id: &Uuid, _new_user: &User) -> Result<()> {
         Err(anyhow!("todo!"))
     }
 
@@ -87,5 +80,13 @@ impl UserRepo for UserRepoDb {
             .fetch_optional(&self.0)
             .await?;
         Ok(user.is_some())
+    }
+
+    async fn get_password_by_id(&self, user_id: &Uuid) -> Result<String> {
+        let (password_hash,) = sqlx::query_as("SELECT (password_hash) FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_one(&self.0)
+            .await?;
+        Ok(password_hash)
     }
 }

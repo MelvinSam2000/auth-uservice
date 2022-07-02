@@ -7,11 +7,12 @@ use actix_web::web::Data;
 use actix_web::App;
 use anyhow::Context;
 use anyhow::Result;
+use chrono::Utc;
 use itertools::assert_equal;
-use serde_json::json;
 use serde_json::Value;
 use uuid::Uuid;
 
+use crate::crypto::PasswordHasher;
 use crate::models::user::User;
 use crate::models::user::UserBuilder;
 use crate::models::user::UserCreateReqDtoBuilder;
@@ -43,8 +44,12 @@ async fn test_get_user_by_id() -> Result<()> {
         );
         let resp_json: Value = test::read_body_json(resp).await;
         assert_eq!(
-            resp_json,
-            json!(user_map.get(&id).context("No user with given ID")?),
+            resp_json
+                .get("username")
+                .context("No username for payload")?
+                .as_str()
+                .context("Cant parse to str")?,
+            user_map.get(&id).context("No user with given ID")?.username,
             "GET {} response is invalid",
             &uri
         );
@@ -64,18 +69,21 @@ async fn test_get_user_by_id() -> Result<()> {
 
 #[actix_web::test]
 async fn test_post_user() -> Result<()> {
-    let (mut user_map, user_repo) = mock_user_repo().await?;
+    let (_, user_repo) = mock_user_repo().await?;
+    let pwd_hasher = Data::new(PasswordHasher::default());
     let app = test::init_service(
         App::new()
             .app_data(user_repo.clone())
+            .app_data(pwd_hasher.clone())
             .route("/users", web::post().to(post_user::<MockUserRepo>)),
     )
     .await;
 
     // Test a valid user creation
+    let password_raw = "abc12345";
     let new_user = UserCreateReqDtoBuilder::default()
         .username("Derek")
-        .password_raw("abc123")
+        .password_raw(password_raw)
         .build()?;
 
     let req = test::TestRequest::post()
@@ -101,12 +109,51 @@ async fn test_post_user() -> Result<()> {
         user_repo.get_user_by_id(&user_id).await.is_ok(),
         "UserRepo does not contain newly created user"
     );
-    let mut new_user = User::from(new_user);
-    new_user.id = Some(user_id);
-    user_map.insert(user_id, new_user);
 
-    assert_equal(user_map.keys(), user_repo.0.lock().await.keys());
-    assert_equal(user_map.values(), user_repo.0.lock().await.values());
+    // Test validation failure
+    let new_user = UserCreateReqDtoBuilder::default()
+        .username("Eric")
+        .password_raw("p")
+        .build()?;
+    let req = test::TestRequest::post()
+        .uri("/users")
+        .set_json(new_user)
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    let resp_status = resp.status();
+    let resp_json: Value = test::read_body_json(resp).await;
+    assert_eq!(
+        resp_status,
+        StatusCode::BAD_REQUEST,
+        "POST /users for validation error status code was not BAD REQUEST. Response: {}",
+        resp_json
+    );
+
+    // Test failure on repeated username
+    let new_user = UserCreateReqDtoBuilder::default()
+        .username("Derek")
+        .password_raw("p")
+        .build()?;
+    let req = test::TestRequest::post()
+        .uri("/users")
+        .set_json(new_user)
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    let resp_status = resp.status();
+    let resp_json: Value = test::read_body_json(resp).await;
+    assert_eq!(
+        resp_status,
+        StatusCode::BAD_REQUEST,
+        "POST /users for repeated username status code was not BAD REQUEST. Response: {}",
+        resp_json
+    );
+
+    // Test password hash is valid
+    let password_hash = &user_repo.get_password_by_id(&user_id).await?;
+    assert!(
+        pwd_hasher.verify_password(password_raw, password_hash)?,
+        "Password validation failed..."
+    );
 
     Ok(())
 }
@@ -165,7 +212,6 @@ async fn mock_user_repo() -> Result<(HashMap<Uuid, User>, Data<MockUserRepo>)> {
                 .id(ids[0])
                 .username("Alice")
                 .password_hash("phash1234")
-                .password_salt("psalt1234")
                 .build()?,
         ),
         (
@@ -174,7 +220,6 @@ async fn mock_user_repo() -> Result<(HashMap<Uuid, User>, Data<MockUserRepo>)> {
                 .id(ids[1])
                 .username("Bob")
                 .password_hash("hunter2")
-                .password_salt("salt")
                 .email("bobmaster@email.com")
                 .build()?,
         ),
@@ -184,10 +229,9 @@ async fn mock_user_repo() -> Result<(HashMap<Uuid, User>, Data<MockUserRepo>)> {
                 .id(ids[2])
                 .username("Carl")
                 .password_hash("blahblah")
-                .password_salt("foobar")
                 .email("carl@email.com")
-                .created_at("2012")
-                .last_login("2013")
+                .created_at(Utc::now())
+                .last_login(Utc::now())
                 .build()?,
         ),
     ]);

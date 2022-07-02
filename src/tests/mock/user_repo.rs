@@ -26,12 +26,9 @@ impl From<HashMap<Uuid, User>> for MockUserRepo {
 
 #[async_trait]
 impl UserRepo for MockUserRepo {
-    async fn create_user(&self, user: &User) -> Result<Uuid> {
-        let user_id = Uuid::new_v4();
-        let mut user = user.clone();
-        user.id = Some(user_id);
-        if self.0.lock().await.insert(user_id, user).is_none() {
-            Ok(user_id)
+    async fn create_user(&self, user: &User) -> Result<()> {
+        if self.0.lock().await.insert(user.id, user.clone()).is_none() {
+            Ok(())
         } else {
             Err(anyhow!("User creation failed!"))
         }
@@ -73,5 +70,14 @@ impl UserRepo for MockUserRepo {
             .values()
             .map(|user| &user.username)
             .any(|other_username| other_username == username))
+    }
+
+    async fn get_password_by_id(&self, user_id: &Uuid) -> Result<String> {
+        self.0
+            .lock()
+            .await
+            .get(user_id)
+            .map(|user| user.password_hash.clone())
+            .context("No user with given ID")
     }
 }
