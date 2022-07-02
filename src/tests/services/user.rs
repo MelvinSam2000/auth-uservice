@@ -26,7 +26,7 @@ use crate::tests::mock::user_repo::MockUserRepo;
 
 #[rstest]
 #[case::no_db(Arc::new(MockUserRepoNoDb))]
-#[case::psql_db(Arc::new(MockUserRepoPsqlDb))]
+//#[case::psql_db(Arc::new(MockUserRepoPsqlDb))]
 #[actix_web::test]
 async fn test_get_user_by_id(#[case] testable_repo: Arc<dyn InjectableMockUserRepo>) -> Result<()> {
     let (user_vec, user_repo) = testable_repo.init(0).await?;
@@ -76,7 +76,7 @@ async fn test_get_user_by_id(#[case] testable_repo: Arc<dyn InjectableMockUserRe
 
 #[rstest]
 #[case::no_db(Arc::new(MockUserRepoNoDb))]
-#[case::psql_db(Arc::new(MockUserRepoPsqlDb))]
+//#[case::psql_db(Arc::new(MockUserRepoPsqlDb))]
 #[actix_web::test]
 async fn test_post_user(#[case] testable_repo: Arc<dyn InjectableMockUserRepo>) -> Result<()> {
     let (_, user_repo) = testable_repo.init(1).await?;
@@ -171,7 +171,7 @@ async fn test_post_user(#[case] testable_repo: Arc<dyn InjectableMockUserRepo>) 
 
 #[rstest]
 #[case::no_db(Arc::new(MockUserRepoNoDb))]
-#[case::psql_db(Arc::new(MockUserRepoPsqlDb))]
+//#[case::psql_db(Arc::new(MockUserRepoPsqlDb))]
 #[actix_web::test]
 async fn test_delete_user(#[case] testable_repo: Arc<dyn InjectableMockUserRepo>) -> Result<()> {
     let (user_vec, user_repo) = testable_repo.init(2).await?;
