@@ -1,3 +1,3 @@
 # Auth UService
 
-Authentication micro service using Actix + Redis
+Authentication micro service in Rust using Actix-Web + Sqlx.
